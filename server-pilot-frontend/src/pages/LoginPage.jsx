@@ -17,7 +17,7 @@ export default function LoginPage({ onConnected }) {
   });
   const [showPw, setShowPw] = useState(false);
   const [testing, setTesting] = useState(false);
-  const [result, setResult] = useState(null);  
+  const [result, setResult] = useState(null);
   const [saving, setSaving] = useState(false);
 
   const set = (k) => (e) => {
@@ -47,7 +47,8 @@ export default function LoginPage({ onConnected }) {
     try {
       // Check if this server is already saved (by host).
       const { data: existing } = await getServers();
-      const already = existing.find(s => s.host === form.host && s.port === Number(form.port));
+      const already = existing.find(s => s.host === form.host && s.port === Number(form.port)
+        && s.username === form.username);
       const server = already ?? (await addServer({ ...form, port: Number(form.port) })).data;
       onConnected?.(server);
     } catch {
@@ -76,22 +77,22 @@ export default function LoginPage({ onConnected }) {
           <div className="grid grid-cols-3 gap-2">
             <div className="col-span-2 space-y-1">
               <Label>Host / IP</Label>
-              <Input placeholder="192.168.1.100" value={form.host} onChange={set("host")} />
+              <Input placeholder="192.168.1.100" value={form.host} onChange={set("host")} disabled={testing} />
             </div>
             <div className="space-y-1">
               <Label>Port</Label>
-              <Input placeholder="22" value={form.port} onChange={set("port")} />
+              <Input placeholder="22" value={form.port} onChange={set("port")} disabled={testing} />
             </div>
           </div>
 
           <div className="grid grid-cols-2 gap-2">
             <div className="space-y-1">
               <Label>Name (optional)</Label>
-              <Input placeholder="My Server" value={form.name} onChange={set("name")} />
+              <Input placeholder="My Server" value={form.name} onChange={set("name")} disabled={testing} />
             </div>
             <div className="space-y-1">
               <Label>Username</Label>
-              <Input placeholder="ubuntu" value={form.username} onChange={set("username")} />
+              <Input placeholder="ubuntu" value={form.username} onChange={set("username")} disabled={testing} />
             </div>
           </div>
 
@@ -105,8 +106,12 @@ export default function LoginPage({ onConnected }) {
               ].map(({ id, label }) => (
                 <Button key={id} type="button"
                   variant={form.authType === id ? "default" : "outline"}
-                  onClick={() => setForm(p => ({ ...p, authType: id }))}
+                  onClick={() => {
+                    setForm(p => ({ ...p, authType: id }));
+                    setResult(null);
+                  }}
                   className="flex-1"
+                  disabled={testing}
                 >
                   {label}
                 </Button>
@@ -123,6 +128,7 @@ export default function LoginPage({ onConnected }) {
                 value={form.privateKey}
                 onChange={set("privateKey")}
                 rows={5}
+                disabled={testing}
               />
             </div>
           ) : (
@@ -135,6 +141,7 @@ export default function LoginPage({ onConnected }) {
                   value={form.password}
                   onChange={set("password")}
                   className="pr-9"
+                  disabled={testing}
                 />
                 <button type="button" onClick={() => setShowPw(p => !p)}
                   className="absolute right-2.5 top-1/2 -translate-y-1/2 text-white/30 hover:text-white/60">
@@ -148,8 +155,8 @@ export default function LoginPage({ onConnected }) {
         {/* Test result banner */}
         {result && (
           <div className={`flex items-start gap-2 rounded-lg border px-3 py-2.5 text-xs ${result.ok
-              ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-400"
-              : "border-red-500/30    bg-red-500/10    text-red-400"
+            ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-400"
+            : "border-red-500/30    bg-red-500/10    text-red-400"
             }`}>
             {result.ok ? <Check size={13} className="shrink-0 mt-0.5" /> : <X size={13} className="shrink-0 mt-0.5" />}
             <span>{result.message}</span>

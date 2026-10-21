@@ -37,10 +37,10 @@ export default function ServersPage() {
 
     const testConn = async () => {
         setTesting(true);
-        const { data } = await connectServer({ ...form, port: Number(form.port) });
-        setTestOk(Boolean(data.connected));
+        setTestOk(null);
         try {
-            setTestOk(true);
+            const { data } = await connectServer({ ...form, port: Number(form.port) });
+            setTestOk(Boolean(data.connected));
         } catch { setTestOk(false); }
         finally { setTesting(false); }
     };
