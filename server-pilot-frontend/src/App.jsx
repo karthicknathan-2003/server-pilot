@@ -8,6 +8,7 @@ import Sidebar from "./components/Sidebar.jsx";
 import Topbar from "./components/Topbar.jsx";
 import DashboardPage from './pages/DashboardPage';
 import ServersPage from './pages/ServersPage';
+import LoginPage from './pages/LoginPage';
 
 
 // Map route paths to page titles.
@@ -102,12 +103,6 @@ function AppContent() {
       </Route>
     </Routes>
   );
-}
-
-// Wrapper so LoginPage import stays lazy-friendly.
-import LoginPage from './pages/LoginPage';
-function LoginPageWrapper({ onConnected }) {
-  return <LoginPage onConnected={onConnected} />;
 }
 
 // Top-level export wraps everything in BrowserRouter.

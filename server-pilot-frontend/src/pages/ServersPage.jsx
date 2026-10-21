@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { Plus, Server, Wifi, Eye, EyeOff, Check, X, RefreshCw, Trash2, CrossIcon, Minus } from "lucide-react";
-import { getServers, addServer, deleteServer, getMetrics } from "../api/endpoints.js";
+import { getServers, addServer, deleteServer, getMetrics, connectServer } from "../api/endpoints.js";
 import { Card } from "../components/ui/card.jsx";
 import { Badge } from "../components/ui/badge.jsx";
 import { Button } from "../components/ui/button.jsx";
@@ -30,13 +30,15 @@ export default function ServersPage() {
     const load = () =>
         getServers()
             .then(({ data }) => setServers(data))
+            .catch(() => setServers([]))
             .finally(() => setLoading(false));
 
     useEffect(() => { load(); }, []);
 
     const testConn = async () => {
         setTesting(true);
-        setTestOk(null);
+        const { data } = await connectServer({ ...form, port: Number(form.port) });
+        setTestOk(Boolean(data.connected));
         try {
             setTestOk(true);
         } catch { setTestOk(false); }
@@ -51,6 +53,8 @@ export default function ServersPage() {
             setShowForm(false);
             setForm({ name: "", host: "", port: "22", username: "", authType: "PASSWORD", password: "", privateKey: "" });
             load();
+        } catch (err) {
+            console.error(err);
         } finally {
             setSubmitting(false);
         }
@@ -179,7 +183,11 @@ function ServerCard({ server: s, onDelete, isDeleting }) {
 
     useEffect(() => {
         if (!expanded || s.status !== "online") return;
-        getMetrics(s.id).then(({ data }) => setMetrics(data));
+        let cancelled = false;
+        getMetrics(s.id)
+            .then(({ data }) => { if (!cancelled) setMetrics(data); })
+            .catch(() => { if (!cancelled) setMetrics(null); });
+        return () => { cancelled = true; };
     }, [expanded, s.id, s.status]);
 
     return (

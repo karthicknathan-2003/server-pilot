@@ -28,13 +28,15 @@ export default function DashboardPage() {
     // Fetch metrics whenever active server changes, refresh every 30 seconds.
     useEffect(() => {
         if (!activeId) return;
+        let cancelled = false;
+        setMetrics(null);
         const load = () =>
             getMetrics(activeId)
-                .then(({ data }) => setMetrics(data))
-                .catch(() => setMetrics(null));
+                .then(({ data }) => { if (!cancelled) setMetrics(data); })
+                .catch(() => { if (!cancelled) setMetrics(null); });
         load();
         const interval = setInterval(load, 30_000);
-        return () => clearInterval(interval);
+        return () => { cancelled = true; clearInterval(interval); };
     }, [activeId]);
 
     if (loading) {
@@ -53,8 +55,9 @@ export default function DashboardPage() {
     if (error) return <p className="text-red-400 text-sm">{error}</p>;
 
     const serverMetrics = metrics;
-    const ramPct = serverMetrics ? Math.round((serverMetrics.ramUsedGb / serverMetrics.ramTotalGb) * 100) : 0;
-    const diskPct = serverMetrics ? Math.round((serverMetrics.diskUsedGb / serverMetrics.diskTotalGb) * 100) : 0;
+    const pctOf = (used, total) => (!total || total <= 0 ? 0 : Math.min(Math.round((used / total) * 100), 100));
+    const ramPct = serverMetrics ? pctOf(serverMetrics.ramUsedGb, serverMetrics.ramTotalGb) : 0;
+    const diskPct = serverMetrics ? pctOf(serverMetrics.diskUsedGb, serverMetrics.diskTotalGb) : 0;
 
     return (
         <div className="space-y-5">
