@@ -4,6 +4,7 @@ import com.jcraft.jsch.Session;
 import com.serverpilot.app.process.dto.ProcessInfo;
 import com.serverpilot.app.server.ServerRepository;
 import com.serverpilot.app.server.SshService;
+import com.serverpilot.app.server.dto.CommandResult;
 import com.serverpilot.app.server.entity.ServerEntity;
 import org.springframework.stereotype.Service;
 
@@ -41,20 +42,23 @@ public class ProcessService {
     public List<ProcessInfo> list(Long serverId) {
         ServerEntity server = serverRepo.findById(serverId).orElseThrow();
         List<ProcessInfo> processList = new ArrayList<>();
+        Session session = null;
         try {
-            Session session = sshService.openSession(server);
+            session = sshService.openSession(server);
             // ps columns: PID, USER, %CPU, RSS(KB), COMM, CMD
-            String raw = sshService.exec(session,
-                    "ps aux --sort=-%cpu | head -30 | tail -n +2");
-            session.disconnect();
-
-            ProcessInfo processInfo = null;
-            for (String line : raw.split("\n")) {
+            CommandResult result = sshService.exec(session,
+                    "ps -eo pid,user,%cpu,rss,comm,args --sort=-%cpu | tail -n +2");
+            ProcessInfo processInfo;
+            for (String line : result.stdout().split("\n")) {
                 processInfo = parsePsLine(line);
                 if (processInfo != null) processList.add(processInfo);
             }
         } catch (Exception e) {
             throw new RuntimeException("Failed to list processes: " + e.getMessage(), e);
+        } finally {
+            if (session != null && session.isConnected()) {
+                session.disconnect();
+            }
         }
         return processList;
     }
@@ -66,13 +70,26 @@ public class ProcessService {
      * @param pid      The ID of the process to stop.
      */
     public void kill(Long serverId, int pid) {
+        if (pid <= 0) {
+            throw new IllegalArgumentException("Process ID must be positive: " + pid);
+        }
         ServerEntity server = serverRepo.findById(serverId).orElseThrow();
+        Session session = null;
         try {
-            Session session = sshService.openSession(server);
-            sshService.exec(session, "kill -9 " + pid);
-            session.disconnect();
+            session = sshService.openSession(server);
+            CommandResult result = sshService.exec(session, "kill -9 " + pid);
+            if (result.exitStatus() != 0) {
+                String error = result.stderr().isBlank()
+                        ? "Process termination failed with exit code " + result.exitStatus()
+                        : result.stderr();
+                throw new RuntimeException(error);
+            }
         } catch (Exception e) {
             throw new RuntimeException("Failed to kill process: " + e.getMessage(), e);
+        } finally {
+            if (session != null && session.isConnected()) {
+                session.disconnect();
+            }
         }
     }
 
@@ -85,16 +102,16 @@ public class ProcessService {
      */
     private ProcessInfo parsePsLine(String line) {
         if (line.isBlank()) return null;
-        String[] partsArray = line.trim().split("\\s+", 11);
-        if (partsArray.length < 11) return null;
+        String[] partsArray = line.trim().split("\\s+", 6);
+        if (partsArray.length < 6) return null;
         try {
             return new ProcessInfo(
-                    Integer.parseInt(partsArray[1]), // PID
-                    partsArray[10].split("/")[partsArray[10].split("/").length - 1], // name from cmd
-                    partsArray[0], // USER
+                    Integer.parseInt(partsArray[0]), // PID
+                    partsArray[4],                   // name from COMM
+                    partsArray[1],                   // USER
                     Double.parseDouble(partsArray[2]), // %CPU
-                    Math.round(Long.parseLong(partsArray[5]) / 1024.0 / 1024.0 * 100) / 100.0, // RSS KB -> GB
-                    partsArray[10] // full command
+                    Math.round(Long.parseLong(partsArray[3]) / 1024.0 / 1024.0 * 100) / 100.0, // RSS KB -> GB
+                    partsArray[5]                    // full command (args)
             );
         } catch (Exception e) {
             return null;

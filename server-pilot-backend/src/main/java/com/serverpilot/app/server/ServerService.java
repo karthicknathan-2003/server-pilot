@@ -1,6 +1,7 @@
 package com.serverpilot.app.server;
 
 import com.jcraft.jsch.Session;
+import com.serverpilot.app.server.dto.CommandResult;
 import com.serverpilot.app.server.dto.ServerRequestDto;
 import com.serverpilot.app.server.dto.ServerResponseDto;
 import com.serverpilot.app.server.dto.SystemMetricsDto;
@@ -88,7 +89,7 @@ public class ServerService {
         try {
             Session session = sshService.openSession(serverEntity);
             // Run all metrics in one SSH exec to minimize the round-trips.
-            String raw = sshService.exec(session, """
+            CommandResult commandResult = sshService.exec(session, """
                     echo "HOSTNAME=$(hostname)"
                     echo "OS=$(grep PRETTY_NAME /etc/os-release | cut -d= -f2 | tr -d '"')"
                     echo "KERNEL=$(uname -r)"
@@ -103,7 +104,7 @@ public class ServerService {
                     echo "NET_TX=$(cat /sys/class/net/eth0/statistics/tx_bytes 2>/dev/null || echo 0)"
                     """);
             session.disconnect();
-            return parseMetrics(raw);
+            return parseMetrics(commandResult.stdout());
         } catch (Exception e) {
             throw new RuntimeException("Failed to fetch metrics: " + e.getMessage(), e);
         }
