@@ -17,4 +17,5 @@ export const killProcess = (sid, pid) => api.delete(`/servers/${sid}/processes/$
 
 // Services
 export const getServices = (sid) => api.get(`/servers/${sid}/services`);
-export const controlService = (sid, n, a) => api.post(`/servers/${sid}/services/${n}/${a}`);
+export const controlService = (sid, n, a) =>
+    api.post(`/servers/${sid}/services/${encodeURIComponent(n)}/${encodeURIComponent(a)}`);

@@ -5,6 +5,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
+import java.util.NoSuchElementException;
 
 /**
  * REST controller to view and manage system services running on a remote server.
@@ -39,14 +40,20 @@ public class ServiceController {
      *
      * @param serverId ID of the selected remote server.
      * @param name     Name of the service to control.
-     * @param action   Action to perform on the service (start, stop, or restart).
+     * @param action   Action to perform on the service (start, stop, restart, enable, or disable).
      *
      * @return Empty response with HTTP 200, if the action is successful.
      */
     @PostMapping("/{name}/{action}")
     public ResponseEntity<Void> control(@PathVariable Long serverId, @PathVariable String name,
                                         @PathVariable String action) {
-        systemdService.control(serverId, name, action);
-        return ResponseEntity.ok().build();
+        try {
+            systemdService.control(serverId, name, action);
+            return ResponseEntity.ok().build();
+        } catch (IllegalArgumentException e) {
+            return ResponseEntity.badRequest().build();
+        } catch (NoSuchElementException e) {
+            return ResponseEntity.notFound().build();
+        }
     }
 }

@@ -47,10 +47,17 @@ public class ProcessService {
             session = sshService.openSession(server);
             // ps columns: PID, USER, %CPU, RSS(KB), COMM, CMD
             CommandResult result = sshService.exec(session,
-                    "ps -eo pid,user,%cpu,rss,comm,args --sort=-%cpu | tail -n +2");
+                    "ps -eo pid,user,%cpu,rss,comm,args --sort=-%cpu");
+            if (result.exitStatus() != 0) {
+                String error = result.stderr().isBlank()
+                        ? "Process listing failed with exit code " + result.exitStatus()
+                        : result.stderr();
+                throw new RuntimeException(error);
+            }
+            String[] lines = result.stdout().split("\n");
             ProcessInfo processInfo;
-            for (String line : result.stdout().split("\n")) {
-                processInfo = parsePsLine(line);
+            for (int i = 1; i < lines.length; i++) {
+                processInfo = parsePsLine(lines[i]);
                 if (processInfo != null) processList.add(processInfo);
             }
         } catch (Exception e) {

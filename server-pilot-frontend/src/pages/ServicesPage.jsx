@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Search, RefreshCw, X } from "lucide-react";
+import { Search, RefreshCw, X, Server } from "lucide-react";
 import { getServers, getServices, controlService, getProcesses, killProcess} from "../api/endpoints.js";
 import { Card } from "../components/ui/card.jsx";
 import { Badge } from "../components/ui/badge.jsx";
@@ -13,42 +13,70 @@ export default function ServicesPage() {
   const [processes, setProcesses] = useState([]);
   const [procSearch, setProcSearch] = useState("");
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
   const [actionName, setActionName] = useState(null);
   const [killingPid, setKillingPid] = useState(null);
 
   useEffect(() => {
-    getServers().then(({ data }) => {
-      const first = data.find(s => s.status === "online");
-      if (first) setServerId(first.id);
-    });
+    let cancelled = false;
+    getServers()
+      .then(({ data }) => {
+        if (cancelled) return;
+        if (data && data.length > 0) {
+          const target = data.find(s => s.status === "online") || data[0];
+          setServerId(target.id);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) setError("Failed to load servers.");
+      });
+    return () => { cancelled = true; };
   }, []);
 
   useEffect(() => {
     if (!serverId) return;
+    let cancelled = false;
     setLoading(true);
+    setError("");
     if (tab === "services") {
-      getServices(serverId).then(({ data }) => setServices(data)).finally(() => setLoading(false));
+      getServices(serverId)
+        .then(({ data }) => { if (!cancelled) setServices(data); })
+        .catch(() => { if (!cancelled) setError("Failed to load services."); })
+        .finally(() => { if (!cancelled) setLoading(false); });
     } else {
-      getProcesses(serverId).then(({ data }) => setProcesses(data)).finally(() => setLoading(false));
+      getProcesses(serverId)
+        .then(({ data }) => { if (!cancelled) setProcesses(data); })
+        .catch(() => { if (!cancelled) setError("Failed to load processes."); })
+        .finally(() => { if (!cancelled) setLoading(false); });
     }
+    return () => { cancelled = true; };
   }, [serverId, tab]);
 
   const control = async (name, action) => {
     setActionName(name);
+    setError("");
     try {
       await controlService(serverId, name, action);
       const { data } = await getServices(serverId);
       setServices(data);
+    } catch (err) {
+      setError(err?.response?.data?.message || `Failed to ${action} service ${name}.`);
     } finally {
       setActionName(null);
     }
   };
 
   const kill = async (pid) => {
+    if (!window.confirm(`Are you sure you want to stop process ${pid}?`)) {
+      return;
+    }
     setKillingPid(pid);
+    setError("");
     try {
       await killProcess(serverId, pid);
       setProcesses(prev => prev.filter(p => p.pid !== pid));
+    } catch (err) {
+      setError(err?.response?.data?.message || `Failed to kill process ${pid}.`);
     } finally {
       setKillingPid(null);
     }
@@ -71,6 +99,22 @@ export default function ServicesPage() {
         ))}
       </div>
 
+      {error && (
+        <div className="flex items-center justify-between rounded-lg border border-red-500/20 bg-red-500/10 px-3 py-2 text-xs text-red-400">
+          <span>{error}</span>
+          <button onClick={() => setError("")} className="hover:text-red-300">
+            <X size={12} />
+          </button>
+        </div>
+      )}
+
+      {!serverId && !loading && (
+        <div className="rounded-xl border border-dashed border-white/10 p-12 text-center">
+          <Server size={24} className="mx-auto text-white/15 mb-2" />
+          <p className="text-sm text-white/30">{error || "No servers available."}</p>
+        </div>
+      )}
+
       {loading && (
         <Card className="p-0 overflow-hidden">
           <div className="divide-y divide-white/5">
@@ -84,7 +128,7 @@ export default function ServicesPage() {
       )}
 
       {/* Services */}
-      {tab === "services" && !loading && (
+      {tab === "services" && !loading && serverId && (
         <Card className="p-0 overflow-hidden">
           <div className="divide-y divide-white/5">
             {services.map(svc => {
@@ -118,7 +162,7 @@ export default function ServicesPage() {
       )}
 
       {/* Processes */}
-      {tab === "processes" && !loading && (
+      {tab === "processes" && !loading && serverId && (
         <div className="space-y-3">
           <div className="flex items-center gap-1.5 rounded-lg border border-white/10 bg-white/5 px-2.5 py-1.5 text-xs w-fit">
             <Search size={12} className="text-white/40" />
