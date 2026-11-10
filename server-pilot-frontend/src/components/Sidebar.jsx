@@ -13,6 +13,7 @@ function Icon({ name, size = 16 }) {
 const NAV = [
   { path: "/", label: "Dashboard", icon: "LayoutDashboard" },
   { path: "/servers", label: "Servers", icon: "Server" },
+  { path: "/services", label: "Services", icon: "Settings" },
 ];
 
 export default function Sidebar({ onNav, collapsed, onToggle, mobileOpen, onMobileClose, serverName }) {

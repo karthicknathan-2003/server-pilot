@@ -9,12 +9,14 @@ import Topbar from "./components/Topbar.jsx";
 import DashboardPage from './pages/DashboardPage';
 import ServersPage from './pages/ServersPage';
 import LoginPage from './pages/LoginPage';
+import ServicesPage from "./pages/ServicesPage.jsx";
 
 
 // Map route paths to page titles.
 const ROUTE_TITLES = {
   "/": "Dashboard",
   "/servers": "Servers",
+  "/services": "Services",
 };
 
 // Layout Shell Component.
@@ -100,6 +102,7 @@ function AppContent() {
       <Route path="/" element={<AppLayout activeServer={activeServer} />}>
         <Route index element={<DashboardPage />} />
         <Route path="servers" element={<ServersPage />} />
+        <Route path="services" element={<ServicesPage />} />
       </Route>
     </Routes>
   );
