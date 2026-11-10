@@ -41,7 +41,6 @@ public class SystemdService {
      */
     public List<ServiceInfo> list(Long serverId) {
         ServerEntity server = serverRepo.findById(serverId).orElseThrow();
-        List<ServiceInfo> serviceInfoList = new ArrayList<>();
         Session session = null;
         try {
             session = sshService.openSession(server);
@@ -54,9 +53,9 @@ public class SystemdService {
                         : unitFilesResult.stderr();
                 throw new RuntimeException("Failed to list unit files: " + error);
             }
+            String[] parts;
+            String unitName;
             Map<String, Boolean> enabledMap = new HashMap<>();
-            String[] parts = null;
-            String unitName = null;
             for (String line : unitFilesResult.stdout().split("\n")) {
                 if (line.isBlank()) continue;
                 parts = line.trim().split("\\s+");
@@ -75,7 +74,7 @@ public class SystemdService {
                 throw new RuntimeException("Failed to list units: " + error);
             }
             Map<String, ServiceInfo> servicesMap = new LinkedHashMap<>();
-            ServiceInfo serviceInfo = null;
+            ServiceInfo serviceInfo;
             for (String line : unitsResult.stdout().split("\n")) {
                 serviceInfo = parseServiceLine(line, enabledMap);
                 if (serviceInfo != null) {
@@ -83,10 +82,10 @@ public class SystemdService {
                 }
             }
             // Merge installed unit files that are not currently loaded (unloaded services).
-            String name = null;
+            String name;
             for (Map.Entry<String, Boolean> entry : enabledMap.entrySet()) {
                 name = entry.getKey();
-                if (!servicesMap.containsKey(name)) {
+                if (!name.endsWith("@") && !servicesMap.containsKey(name)) {
                     servicesMap.put(name, new ServiceInfo(name, "inactive", entry.getValue(), ""));
                 }
             }
@@ -114,14 +113,14 @@ public class SystemdService {
         if (!List.of("start", "stop", "restart", "enable", "disable").contains(action)) {
             throw new IllegalArgumentException("Unknown action: " + action);
         }
-        if (name == null || !name.matches("[A-Za-z0-9:_.@-]+")) {
+        if (name == null || !name.matches("[A-Za-z0-9:_.@][A-Za-z0-9:_.@-]*")) {
             throw new IllegalArgumentException("Invalid service name: " + name);
         }
         ServerEntity server = serverRepo.findById(serverId).orElseThrow();
         Session session = null;
         try {
             session = sshService.openSession(server);
-            CommandResult result = sshService.exec(session, "sudo systemctl " + action + " " + name);
+            CommandResult result = sshService.exec(session, "sudo systemctl " + action + " " + name + ".service");
             if (result.exitStatus() != 0) {
                 String error = result.stderr().isBlank()
                         ? "Command exited with status " + result.exitStatus()
