@@ -19,3 +19,9 @@ export const killProcess = (sid, pid) => api.delete(`/servers/${sid}/processes/$
 export const getServices = (sid) => api.get(`/servers/${sid}/services`);
 export const controlService = (sid, n, a) =>
     api.post(`/servers/${sid}/services/${encodeURIComponent(n)}/${encodeURIComponent(a)}`);
+
+// Files
+export const listFiles = (sid, path) => api.get(`/servers/${sid}/files`, { params: { path } });
+export const mkdir = (sid, path) => api.post(`/servers/${sid}/files/mkdir`, { path });
+export const deleteFile = (sid, path) => api.delete(`/servers/${sid}/files`, { params: { path } });
+export const renameFile = (sid, o, n) => api.post(`/servers/${sid}/files/rename`, { oldPath: o, newPath: n });
