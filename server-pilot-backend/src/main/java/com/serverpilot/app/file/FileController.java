@@ -74,8 +74,11 @@ public class FileController {
      * @return HTTP 200 OK if the rename or move is successful.
      */
     @PostMapping("/rename")
-    public ResponseEntity<Void> rename(@PathVariable Long serverId, @RequestBody Map<String, String> body) {
-        fileService.rename(serverId, body.get("oldPath"), body.get("newPath"));
+    public ResponseEntity<Void> rename(@PathVariable Long serverId, @RequestBody Map<String, Object> body) {
+        String oldPath = (String) body.get("oldPath");
+        String newPath = (String) body.get("newPath");
+        boolean overwrite = Boolean.parseBoolean(String.valueOf(body.getOrDefault("overwrite", false)));
+        fileService.rename(serverId, oldPath, newPath, overwrite);
         return ResponseEntity.ok().build();
     }
 }
