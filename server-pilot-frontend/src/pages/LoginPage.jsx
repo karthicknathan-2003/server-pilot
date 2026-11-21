@@ -59,7 +59,7 @@ export default function LoginPage({ onConnected }) {
   };
 
   return (
-    <div className="flex h-screen items-center justify-center bg-gradient-to-br from-gray-950 via-gray-900 to-gray-950 p-4">
+    <div className="flex min-h-full w-full items-center justify-center bg-gradient-to-br from-gray-950 via-gray-900 to-gray-950 p-4">
       <Card className="w-full max-w-md p-8 space-y-6">
         {/* Logo */}
         <div className="flex items-center gap-3">

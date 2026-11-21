@@ -14,6 +14,7 @@ const NAV = [
   { path: "/", label: "Dashboard", icon: "LayoutDashboard" },
   { path: "/servers", label: "Servers", icon: "Server" },
   { path: "/services", label: "Services", icon: "Settings" },
+  { path: "/files", label: "Files", icon: "Folder" }
 ];
 
 export default function Sidebar({ onNav, collapsed, onToggle, mobileOpen, onMobileClose, serverName }) {
@@ -35,7 +36,7 @@ export default function Sidebar({ onNav, collapsed, onToggle, mobileOpen, onMobi
         fixed md:static inset-y-0 left-0 z-30
         flex flex-col bg-gray-950/95 backdrop-blur
         border-r border-white/8 transition-all duration-200
-        ${collapsed ? "w-16" : "w-56"}
+        ${collapsed ? "w-16" : "w-56"} h-full
         ${mobileOpen ? "translate-x-0" : "-translate-x-full md:translate-x-0"}
       `}>
         {/* Logo */}

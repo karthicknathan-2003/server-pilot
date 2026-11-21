@@ -10,6 +10,7 @@ import DashboardPage from './pages/DashboardPage';
 import ServersPage from './pages/ServersPage';
 import LoginPage from './pages/LoginPage';
 import ServicesPage from "./pages/ServicesPage.jsx";
+import FilesPage from "./pages/FilesPage.jsx";
 
 
 // Map route paths to page titles.
@@ -36,7 +37,7 @@ function AppLayout({ activeServer }) {
   };
 
   return (
-    <div className="flex h-screen overflow-hidden bg-gradient-to-br from-gray-950 via-gray-900 to-gray-950 text-white">
+    <div className="flex h-full w-full overflow-hidden bg-gradient-to-br from-gray-950 via-gray-900 to-gray-950 text-white">
       <Sidebar
         collapsed={collapsed}
         onNav={handleNav}
@@ -80,7 +81,7 @@ function AppContent() {
 
   if (initLoading) {
     return (
-      <div className="flex h-screen items-center justify-center bg-gray-950 text-white">
+      <div className="flex h-full w-full items-center justify-center bg-gray-950 text-white">
         <RefreshCw size={24} className="animate-spin text-blue-500" />
       </div>
     );
@@ -103,6 +104,7 @@ function AppContent() {
         <Route index element={<DashboardPage />} />
         <Route path="servers" element={<ServersPage />} />
         <Route path="services" element={<ServicesPage />} />
+        <Route path="files" element={<FilesPage />} />
       </Route>
     </Routes>
   );
