@@ -8,6 +8,8 @@ import com.serverpilot.app.server.dto.CommandResult;
 import com.serverpilot.app.server.entity.ServerEntity;
 import org.springframework.stereotype.Service;
 
+import java.io.ByteArrayOutputStream;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -201,122 +203,52 @@ public class FileService {
     private FileEntry parseLsLine(String line) {
         // Skip header lines (e.g. "total 10452") and empty lines produced by trailing newlines.
         if (line.startsWith("total") || line.isBlank()) return null;
-
         String trimmed = line.trim();
         int firstQuote = trimmed.indexOf('"');
-
         String prefix;
         String name;
         String linkTarget = null;
-
-        // Quoted Output Parsing (from `ls -la -Q`):
-        // Why: Standard `ls` outputs symlinks as `name -> target`. If a filename itself
-        // contains " -> " or spaces, splitting by whitespace or " -> " is ambiguous and
-        // corrupts filenames. GNU `ls -Q` cleanly wraps names as:
-        //   - Regular file:  drwxr-xr-x ... "my file.txt"
-        //   - Symlink:       lrwxrwxrwx ... "link name" -> "target path"
-        // The first quote is guaranteed to mark the start of the file name.
         if (firstQuote != -1) {
-            // Everything before the first quote contains standard metadata:
-            // perms, owner, size/devices, date, time
+            // Everything before the first quote contains: perms, owner, size/devices, date, time.
             prefix = trimmed.substring(0, firstQuote).trim();
-
-            // Parse the first quoted string (the entry's exact name),
-            // handling C-style escapes (\", \\, \n, \t).
-            StringBuilder nameSb = new StringBuilder();
-            int i = firstQuote + 1;
-            boolean escaped = false;
-            while (i < trimmed.length()) {
-                char c = trimmed.charAt(i);
-                if (escaped) {
-                    if (c == 'n') nameSb.append('\n');
-                    else if (c == 't') nameSb.append('\t');
-                    else if (c == 'r') nameSb.append('\r');
-                    else nameSb.append(c);
-                    escaped = false;
-                } else if (c == '\\') {
-                    escaped = true; // Next character is escaped (e.g. embedded quote \").
-                } else if (c == '"') {
-                    i++; // Closing quote found; marks the end of the entry name.
-                    break;
-                } else {
-                    nameSb.append(c);
-                }
-                i++;
-            }
-            name = nameSb.toString();
-
-            /* If this is a symlink, `ls -Q` appends ` -> "target"`. We locate the next quoted string
-            to extract the target path cleanly without ever splitting on the "->" token. */
-            int nextQuote = trimmed.indexOf('"', i);
-            if (nextQuote != -1) {
-                StringBuilder targetSb = new StringBuilder();
-                int j = nextQuote + 1;
-                escaped = false;
-                while (j < trimmed.length()) {
-                    char c = trimmed.charAt(j);
-                    if (escaped) {
-                        if (c == 'n') targetSb.append('\n');
-                        else if (c == 't') targetSb.append('\t');
-                        else if (c == 'r') targetSb.append('\r');
-                        else targetSb.append(c);
-                        escaped = false;
-                    } else if (c == '\\') {
-                        escaped = true;
-                    } else if (c == '"') {
-                        break; // Closing quote for the link target.
-                    } else {
-                        targetSb.append(c);
-                    }
-                    j++;
-                }
-                linkTarget = targetSb.toString();
+            // Decode the entry name using the complete C-style quoting decoder.
+            DecodeResult nameResult = decodeQuotedString(trimmed, firstQuote);
+            if (nameResult == null) return null;
+            name = nameResult.text();
+            // Decode optional link target if present (symlinks format as "name" -> "target").
+            DecodeResult targetResult = decodeQuotedString(trimmed, nameResult.nextIndex());
+            if (targetResult != null) {
+                linkTarget = targetResult.text();
             }
         } else {
             /* Unquoted Fallback Parsing:
-            Why: Fallback in case `ls` output was executed without `-Q`.
             Device entries shift columns (9 parts instead of 8), so we detect device type
             before determining where the name token begins. */
             String[] parts = trimmed.split("\\s+");
             if (parts.length < 8) return null;
-
             String perms = parts[0];
             boolean isDev = perms.startsWith("c") || perms.startsWith("b");
             int minParts = isDev ? 9 : 8;
-
             String[] splitParts = trimmed.split("\\s+", minParts);
             if (splitParts.length < minParts) return null;
-
             prefix = trimmed.substring(0, trimmed.lastIndexOf(splitParts[minParts - 1])).trim();
             name = splitParts[minParts - 1];
         }
-
         // Skip current and parent directory pointers.
         if (name.equals(".") || name.equals("..")) return null;
-
         // Metadata Token Resolution.
         String[] prefixParts = prefix.split("\\s+");
         if (prefixParts.length < 6) return null;
-
         String perms = prefixParts[0];
-
-        /* Why: In Linux, permissions mode string reliably identifies file type by its 1st character:
-        'd' = directory, 'l' = symlink, 'c' = character device, 'b' = block device, '-' = regular file. */
         boolean isDevice = perms.startsWith("c") || perms.startsWith("b");
         String type = perms.startsWith("d") ? "dir"
                 : perms.startsWith("l") ? "link"
                 : isDevice ? "device"
                 : "file";
-
         String modified;
         String size = "—";
-
         if (isDevice) {
-            /* Device Major/Minor Handling:
-            Why: Devices (e.g. /dev/null, /dev/sda) do not have a byte size.
-            Instead, `ls -l` outputs "major, minor" numbers (e.g., `1, 3` with spaces),
-            which shifts modified date and time to columns 6 and 7 (instead of 5 and 6).
-            We set size to "—" and never pass "1," to Long.parseLong to avoid NumberFormatException. */
+            // Devices shift date & time to columns 6 and 7 due to major/minor numbers.
             if (prefixParts.length >= 8) {
                 modified = prefixParts[6] + " " + prefixParts[7];
             } else {
@@ -324,15 +256,11 @@ public class FileService {
             }
             size = "—";
         } else {
-            // Regular entries have size at index 4, date at 5, and time at 6
             if (prefixParts.length >= 7) {
                 modified = prefixParts[5] + " " + prefixParts[6];
             } else {
                 modified = prefixParts[prefixParts.length - 2] + " " + prefixParts[prefixParts.length - 1];
             }
-
-            // Only regular files display byte sizes. We guard with try-catch so that an
-            // unexpected token never crashes or aborts the entire directory listing.
             if (type.equals("file")) {
                 try {
                     size = formatBytes(Long.parseLong(prefixParts[4]));
@@ -341,7 +269,6 @@ public class FileService {
                 }
             }
         }
-
         return new FileEntry(name, type, size, perms, modified, linkTarget);
     }
 
@@ -370,5 +297,136 @@ public class FileService {
      */
     private String escapeShell(String path) {
         return "'" + path.replace("'", "'\\''") + "'";
+    }
+
+    /**
+     * Represents the result of decoding a C-style quoted string.
+     *
+     * @param text      The fully unescaped string.
+     * @param nextIndex The index immediately following the closing quote.
+     */
+    private record DecodeResult(String text, int nextIndex) {
+    }
+
+    /**
+     * Decodes a double-quoted string produced by {@code ls -la -Q} back into its real filename.
+     *
+     * <p><b>Why we need this:</b><br>
+     * When we ask {@code ls} for quoted filenames using the {@code -Q} flag, Linux formats them
+     * using C-style escaping. Ordinary characters stay as they are, but special or non-printable
+     * characters get escaped. For example, spaces stay inside the quotes, quotes become {@code \"},
+     * tabs become {@code \t}, backspaces become {@code \b}, and non-ASCII or control characters
+     * are printed as octal byte sequences like {@code \001} or {@code \303\251}.</p>
+     *
+     * <p>If we don't decode these escapes properly (or only partially replace a few like {@code \n}),
+     * a filename containing a backspace would turn into a literal letter 'b', or an accented letter
+     * would turn into numbers. When a user later tries to click, rename, or delete that file, the server
+     * will say "No such file or directory" because the filename in our database doesn't match the real one.</p>
+     *
+     * @param s          The raw line from {@code ls} containing the quoted text.
+     * @param startIndex Where to start searching for the opening double quote.
+     *
+     * @return A {@link DecodeResult} holding the unescaped string and where the quote ended,
+     * or {@code null} if no quote was found.
+     */
+    private DecodeResult decodeQuotedString(String s, int startIndex) {
+        // Find where the filename starts (the first opening double-quote)
+        int firstQuote = s.indexOf('"', startIndex);
+        if (firstQuote == -1) {
+            return null;
+        }
+
+        // We accumulate raw bytes instead of characters. This is important because
+        // octal escapes (\303\251) represent raw UTF-8 bytes that must be pieced back together.
+        ByteArrayOutputStream bout = new ByteArrayOutputStream();
+        int i = firstQuote + 1;
+
+        while (i < s.length()) {
+            char c = s.charAt(i);
+
+            // An unescaped quote marks the end of this filename
+            if (c == '"') {
+                return new DecodeResult(bout.toString(StandardCharsets.UTF_8), i + 1);
+            }
+
+            if (c == '\\') {
+                i++;
+                if (i >= s.length()) {
+                    bout.write('\\');
+                    break;
+                }
+
+                char esc = s.charAt(i);
+                switch (esc) {
+                    // Standard C control character escapes.
+                    case 'a':
+                        bout.write(7);
+                        break;      // audible bell
+                    case 'b':
+                        bout.write('\b');
+                        break;   // backspace
+                    case 'f':
+                        bout.write('\f');
+                        break;   // form feed
+                    case 'n':
+                        bout.write('\n');
+                        break;   // newline
+                    case 'r':
+                        bout.write('\r');
+                        break;   // carriage return
+                    case 't':
+                        bout.write('\t');
+                        break;   // tab
+                    case 'v':
+                        bout.write(11);
+                        break;     // vertical tab
+                    case '\\':
+                        bout.write('\\');
+                        break;   // literal backslash
+                    case '"':
+                        bout.write('"');
+                        break;    // literal double quote
+                    case '\'':
+                        bout.write('\'');
+                        break;   // literal single quote
+                    case '?':
+                        bout.write('?');
+                        break;    // question mark
+
+                    default:
+                        // Handle octal numbers like \001 or \303.
+                        // Linux ls prints non-printable bytes as 1 to 3 octal digits [0-7].
+                        if (esc >= '0' && esc <= '7') {
+                            int octVal = esc - '0';
+                            int digits = 1;
+
+                            // Grab up to two more octal digits if they follow immediately.
+                            while (digits < 3 && i + 1 < s.length()) {
+                                char next = s.charAt(i + 1);
+                                if (next >= '0' && next <= '7') {
+                                    octVal = (octVal << 3) + (next - '0');
+                                    i++;
+                                    digits++;
+                                } else {
+                                    break;
+                                }
+                            }
+                            bout.write(octVal & 0xFF);
+                        } else {
+                            // If an unknown escape sequence shows up, keep the character as-is.
+                            byte[] raw = String.valueOf(esc).getBytes(StandardCharsets.UTF_8);
+                            bout.write(raw, 0, raw.length);
+                        }
+                        break;
+                }
+            } else {
+                // Regular character: write its UTF-8 bytes directly.
+                byte[] raw = String.valueOf(c).getBytes(StandardCharsets.UTF_8);
+                bout.write(raw, 0, raw.length);
+            }
+            i++;
+        }
+        // If line ended without a closing quote, return whatever we managed to decode.
+        return new DecodeResult(bout.toString(StandardCharsets.UTF_8), i);
     }
 }

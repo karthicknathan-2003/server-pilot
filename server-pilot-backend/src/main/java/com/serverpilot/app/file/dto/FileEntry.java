@@ -12,6 +12,10 @@ public record FileEntry(
         String type,
         String size,
         String permissions,
-        String modified
+        String modified,
+        String linkTarget
 ) {
+    public FileEntry(String name, String type, String size, String permissions, String modified) {
+        this(name, type, size, permissions, modified, null);
+    }
 }
