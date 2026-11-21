@@ -1,5 +1,5 @@
-import { useEffect, useState } from "react";
-import { ArrowLeft, ChevronRight, Search, Plus, Upload, Folder, File, Trash2, Edit3, Download, RefreshCw } from "lucide-react";
+import { useEffect, useState, useRef, useCallback } from "react";
+import { ArrowLeft, ChevronRight, Search, Plus, Upload, Folder, File, Trash2, Edit3, Download, RefreshCw, X } from "lucide-react";
 import { getServers, listFiles, mkdir, deleteFile, renameFile } from "../api/endpoints.js";
 import { Card } from "../components/ui/card.jsx";
 import { Button } from "../components/ui/button.jsx";
@@ -12,7 +12,11 @@ export default function FilesPage() {
     const [path, setPath] = useState("/");
     const [entries, setEntries] = useState([]);
     const [selected, setSelected] = useState(null);
-    const [loading, setLoading] = useState(true);
+    const [loading, setLoading] = useState(false);
+    const [serverLoading, setServerLoading] = useState(true);
+    const [serverError, setServerError] = useState(null);
+    const [listingError, setListingError] = useState(null);
+    const [mutationError, setMutationError] = useState(null);
     const [creating, setCreating] = useState(false);
     const [deletingItem, setDeletingItem] = useState(null);
     const [renaming, setRenaming] = useState(false);
@@ -22,22 +26,77 @@ export default function FilesPage() {
     const [renameMode, setRenameMode] = useState(false);
     const [renameName, setRenameName] = useState("");
 
-    useEffect(() => {
-        getServers().then(({ data }) => {
-            setServers(data);
-            const first = data.find(s => s.status === "online");
-            if (first) setServerId(first.id);
-        });
+    // Keep reference to current scope to avoid applying stale responses.
+    const currentScopeRef = useRef({ serverId, path });
+    currentScopeRef.current = { serverId, path };
+
+    const discoverServers = useCallback(async () => {
+        setServerLoading(true);
+        setServerError(null);
+        try {
+            const { data } = await getServers();
+            const list = Array.isArray(data) ? data : [];
+            setServers(list);
+            const onlineServers = list.filter(s => s.status === "online");
+            const first = onlineServers[0];
+            if (first) {
+                setServerId(first.id);
+            } else {
+                setServerId(null);
+                setLoading(false);
+                setServerError("No online server available.");
+            }
+        } catch {
+            setServers([]);
+            setServerId(null);
+            setLoading(false);
+            setServerError("Failed to discover servers.");
+        } finally {
+            setServerLoading(false);
+        }
     }, []);
 
     useEffect(() => {
-        if (!serverId) return;
+        discoverServers();
+    }, [discoverServers]);
+
+    const loadListing = useCallback((targetServerId, targetPath) => {
+        if (!targetServerId) {
+            setEntries([]);
+            setLoading(false);
+            return;
+        }
+        const reqScope = { serverId: targetServerId, path: targetPath };
         setLoading(true);
-        listFiles(serverId, path)
-            .then(({ data }) => setEntries(data))
-            .catch(() => setEntries([]))
-            .finally(() => setLoading(false));
-    }, [serverId, path]);
+        setListingError(null);
+        listFiles(targetServerId, targetPath)
+            .then(({ data }) => {
+                if (currentScopeRef.current.serverId === reqScope.serverId && currentScopeRef.current.path === reqScope.path) {
+                    setEntries(data || []);
+                    setListingError(null);
+                }
+            })
+            .catch(err => {
+                if (currentScopeRef.current.serverId === reqScope.serverId && currentScopeRef.current.path === reqScope.path) {
+                    setEntries([]);
+                    setListingError(err?.response?.data?.message || "Failed to load directory contents.");
+                }
+            })
+            .finally(() => {
+                if (currentScopeRef.current.serverId === reqScope.serverId && currentScopeRef.current.path === reqScope.path) {
+                    setLoading(false);
+                }
+            });
+    }, []);
+
+    useEffect(() => {
+        if (!serverId) {
+            setEntries([]);
+            setLoading(false);
+            return;
+        }
+        loadListing(serverId, path);
+    }, [serverId, path, loadListing]);
 
     const navigate = (entry) => {
         if (entry.type !== "dir") { setSelected(entry.name); return; }
@@ -61,39 +120,69 @@ export default function FilesPage() {
         }, [{ label: "/", path: "/" }]);
 
     const createFolder = async () => {
-        if (!newFolderName.trim() || creating) return;
+        if (!serverId || !newFolderName.trim() || creating) return;
         setCreating(true);
+        setMutationError(null);
+        const targetServerId = serverId;
+        const targetPath = path;
         try {
-            await mkdir(serverId, `${path}/${newFolderName}`);
-            setNewFolderMode(false); setNewFolderName("");
-            const { data } = await listFiles(serverId, path);
-            setEntries(data);
+            await mkdir(targetServerId, `${targetPath === "/" ? "" : targetPath}/${newFolderName}`);
+            setNewFolderMode(false);
+            setNewFolderName("");
+            const { data } = await listFiles(targetServerId, targetPath);
+            if (currentScopeRef.current.serverId === targetServerId && currentScopeRef.current.path === targetPath) {
+                setEntries(data);
+                setListingError(null);
+            }
+        } catch (err) {
+            setMutationError(err?.response?.data?.message || "Failed to create folder.");
         } finally {
             setCreating(false);
         }
     };
 
     const doDelete = async (name) => {
-        if (deletingItem) return;
+        if (!serverId || deletingItem) return;
         setDeletingItem(name);
+        setMutationError(null);
+        const targetServerId = serverId;
+        const targetPath = path;
         try {
-            await deleteFile(serverId, `${path}/${name}`);
-            setSelected(null);
-            const { data } = await listFiles(serverId, path);
-            setEntries(data);
+            await deleteFile(targetServerId, `${targetPath === "/" ? "" : targetPath}/${name}`);
+            if (selected === name) setSelected(null);
+            const { data } = await listFiles(targetServerId, targetPath);
+            if (currentScopeRef.current.serverId === targetServerId && currentScopeRef.current.path === targetPath) {
+                setEntries(data);
+                setListingError(null);
+            }
+        } catch (err) {
+            setMutationError(err?.response?.data?.message || `Failed to delete ${name}.`);
         } finally {
             setDeletingItem(null);
         }
     };
 
     const doRename = async () => {
-        if (!renameName.trim() || renaming) return;
+        if (!serverId || !renameName.trim() || renaming) return;
         setRenaming(true);
+        setMutationError(null);
+        const targetServerId = serverId;
+        const targetPath = path;
         try {
-            await renameFile(serverId, `${path}/${selected}`, `${path}/${renameName}`);
-            setRenameMode(false); setSelected(null);
-            const { data } = await listFiles(serverId, path);
-            setEntries(data);
+            await renameFile(
+                targetServerId,
+                `${targetPath === "/" ? "" : targetPath}/${selected}`,
+                `${targetPath === "/" ? "" : targetPath}/${renameName}`
+            );
+            setRenameMode(false);
+            setSelected(null);
+            const { data } = await listFiles(targetServerId, targetPath);
+            if (currentScopeRef.current.serverId === targetServerId && currentScopeRef.current.path === targetPath) {
+                setEntries(data);
+                setListingError(null);
+            }
+        } catch (err) {
+            setMutationError(err?.response?.data?.message || `Failed to rename ${selected}.`);
         } finally {
             setRenaming(false);
         }
@@ -107,17 +196,36 @@ export default function FilesPage() {
         <div className="space-y-4">
             {/* Server selector */}
             {servers.length > 1 && (
-                <select value={serverId || ""} onChange={e => { setServerId(Number(e.target.value)); setPath("/"); }}
-                    className="rounded-lg border border-white/10 bg-gray-900 px-3 py-1.5 text-xs text-white/60 outline-none">
+                <select
+                    value={serverId || ""}
+                    onChange={e => {
+                        setServerId(Number(e.target.value));
+                        setPath("/");
+                        setSelected(null);
+                        setRenameMode(false);
+                        setRenameName("");
+                    }}
+                    className="rounded-lg border border-white/10 bg-gray-900 px-3 py-1.5 text-xs text-white/60 outline-none"
+                >
                     {servers.filter(s => s.status === "online").map(s => (
                         <option key={s.id} value={s.id}>{s.name}</option>
                     ))}
                 </select>
             )}
 
+            {/* Mutation error banner */}
+            {mutationError && (
+                <div className="flex items-center justify-between rounded-lg border border-red-500/20 bg-red-500/10 px-3 py-2 text-xs text-red-400">
+                    <span>{mutationError}</span>
+                    <button onClick={() => setMutationError(null)} className="hover:text-red-300">
+                        <X size={12} />
+                    </button>
+                </div>
+            )}
+
             {/* Toolbar */}
             <div className="flex flex-wrap items-center gap-2">
-                <Button onClick={goUp} disabled={path === "/"} variant="outline" size="sm">
+                <Button onClick={goUp} disabled={!serverId || path === "/"} variant="outline" size="sm">
                     <ArrowLeft size={13} />
                 </Button>
 
@@ -126,26 +234,37 @@ export default function FilesPage() {
                     {crumbs.map((c, i) => (
                         <span key={c.path} className="flex items-center gap-1 shrink-0">
                             {i > 0 && <ChevronRight size={11} className="text-white/20" />}
-                            <button onClick={() => goTo(c.path)} className="text-blue-400 hover:text-blue-300 cursor-pointer">{c.label}</button>
+                            <button
+                                onClick={() => goTo(c.path)}
+                                disabled={!serverId}
+                                className="text-blue-400 hover:text-blue-300 disabled:pointer-events-none disabled:text-white/40 cursor-pointer"
+                            >
+                                {c.label}
+                            </button>
                         </span>
                     ))}
                 </div>
 
                 <div className="flex items-center gap-1.5 rounded-lg border border-white/10 bg-white/5 px-2.5 py-1.5 text-xs text-white/50">
                     <Search size={12} />
-                    <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search…"
-                        className="bg-transparent outline-none w-24 sm:w-32 text-white placeholder-white/20" />
+                    <input
+                        value={search}
+                        onChange={e => setSearch(e.target.value)}
+                        disabled={!serverId}
+                        placeholder="Search…"
+                        className="bg-transparent outline-none w-24 sm:w-32 text-white placeholder-white/20 disabled:cursor-not-allowed"
+                    />
                 </div>
-                <Button onClick={() => setNewFolderMode(m => !m)} variant="outline" size="sm">
+                <Button onClick={() => setNewFolderMode(m => !m)} disabled={!serverId} variant="outline" size="sm">
                     <Plus size={12} /> Folder
                 </Button>
-                <Button variant="default" size="sm">
+                <Button variant="default" size="sm" disabled title="File transfer is unavailable">
                     <Upload size={12} /> Upload
                 </Button>
             </div>
 
             {/* New folder row */}
-            {newFolderMode && (
+            {newFolderMode && serverId && (
                 <div className="flex items-center gap-2">
                     <Input autoFocus value={newFolderName} onChange={e => setNewFolderName(e.target.value)}
                         onKeyDown={e => { if (e.key === "Enter") createFolder(); if (e.key === "Escape") setNewFolderMode(false); }}
@@ -169,13 +288,27 @@ export default function FilesPage() {
                     <span className="col-span-1" />
                 </div>
 
-                {loading ? (
+                {serverLoading || loading ? (
                     <div className="divide-y divide-white/5">
                         <TableRowSkeleton />
                         <TableRowSkeleton />
                         <TableRowSkeleton />
                         <TableRowSkeleton />
                         <TableRowSkeleton />
+                    </div>
+                ) : serverError || !serverId ? (
+                    <div className="py-12 text-center text-xs space-y-3">
+                        <p className="text-red-400">{serverError || "No server selected."}</p>
+                        <Button onClick={discoverServers} variant="outline" size="sm" className="gap-1.5 mx-auto">
+                            <RefreshCw size={12} /> Retry Discovery
+                        </Button>
+                    </div>
+                ) : listingError ? (
+                    <div className="py-12 text-center text-xs space-y-3">
+                        <p className="text-red-400">{listingError}</p>
+                        <Button onClick={() => loadListing(serverId, path)} variant="outline" size="sm" className="gap-1.5 mx-auto">
+                            <RefreshCw size={12} /> Retry
+                        </Button>
                     </div>
                 ) : visible.length === 0 ? (
                     <div className="py-12 text-center text-xs text-white/30">
@@ -217,7 +350,7 @@ export default function FilesPage() {
             {selected && !entries.find(e => e.name === selected && e.type === "dir") && (
                 <Card className="flex flex-wrap items-center gap-3">
                     <File size={14} className="text-white/40" />
-                    <span className="text-sm text-white/70 flex-1 min-w-0 truncate font-mono">{path}/{selected}</span>
+                    <span className="text-sm text-white/70 flex-1 min-w-0 truncate font-mono">{path === "/" ? "" : path}/{selected}</span>
                     {renameMode ? (
                         <div className="flex gap-2 items-center">
                             <input autoFocus value={renameName} onChange={e => setRenameName(e.target.value)}
@@ -232,7 +365,8 @@ export default function FilesPage() {
                                 className="flex items-center gap-1 rounded-lg border border-white/10 bg-white/5 hover:bg-white/10 px-2.5 py-1.5 text-xs text-white/60">
                                 <Edit3 size={12} /> Rename
                             </button>
-                            <button className="flex items-center gap-1 rounded-lg border border-white/10 bg-white/5 hover:bg-white/10 px-2.5 py-1.5 text-xs text-white/60">
+                            <button disabled title="File transfer is unavailable"
+                                className="flex items-center gap-1 rounded-lg border border-white/10 bg-white/5 px-2.5 py-1.5 text-xs text-white/40 cursor-not-allowed opacity-50">
                                 <Download size={12} /> Download
                             </button>
                             <button onClick={() => doDelete(selected)}
