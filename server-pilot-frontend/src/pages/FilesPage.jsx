@@ -119,25 +119,39 @@ export default function FilesPage() {
             return [...acc, { label: seg, path: p }];
         }, [{ label: "/", path: "/" }]);
 
-    const createFolder = async () => {
+        const createFolder = async () => {
         if (!serverId || !newFolderName.trim() || creating) return;
         setCreating(true);
         setMutationError(null);
+        // Snapshot the current scope to guard against stale updates if the user navigates away.
         const targetServerId = serverId;
         const targetPath = path;
+
+        // Perform folder creation.
         try {
             await mkdir(targetServerId, `${targetPath === "/" ? "" : targetPath}/${newFolderName}`);
             setNewFolderMode(false);
             setNewFolderName("");
+        } catch (err) {
+            // Report creation error and halt flow without attempting listing refresh.
+            setMutationError(err?.response?.data?.message || "Failed to create folder.");
+            return;
+        } finally {
+            setCreating(false);
+        }
+
+        // Refresh directory listing independently so refresh failure does not report creation failure.
+        try {
             const { data } = await listFiles(targetServerId, targetPath);
             if (currentScopeRef.current.serverId === targetServerId && currentScopeRef.current.path === targetPath) {
-                setEntries(data);
+                setEntries(data || []);
                 setListingError(null);
             }
         } catch (err) {
-            setMutationError(err?.response?.data?.message || "Failed to create folder.");
-        } finally {
-            setCreating(false);
+            // Preserve successful folder creation, set listingError to expose the table retry action.
+            if (currentScopeRef.current.serverId === targetServerId && currentScopeRef.current.path === targetPath) {
+                setListingError(err?.response?.data?.message || "Failed to refresh directory listing.");
+            }
         }
     };
 
@@ -145,20 +159,34 @@ export default function FilesPage() {
         if (!serverId || deletingItem) return;
         setDeletingItem(name);
         setMutationError(null);
+        // Snapshot target server and directory path before async operation.
         const targetServerId = serverId;
         const targetPath = path;
+
+        // Perform file/directory deletion.
         try {
             await deleteFile(targetServerId, `${targetPath === "/" ? "" : targetPath}/${name}`);
             if (selected === name) setSelected(null);
+        } catch (err) {
+            // Report deletion failure and exit early.
+            setMutationError(err?.response?.data?.message || `Failed to delete ${name}.`);
+            return;
+        } finally {
+            setDeletingItem(null);
+        }
+
+        // Refresh directory contents separately from deletion status.
+        try {
             const { data } = await listFiles(targetServerId, targetPath);
             if (currentScopeRef.current.serverId === targetServerId && currentScopeRef.current.path === targetPath) {
-                setEntries(data);
+                setEntries(data || []);
                 setListingError(null);
             }
         } catch (err) {
-            setMutationError(err?.response?.data?.message || `Failed to delete ${name}.`);
-        } finally {
-            setDeletingItem(null);
+            // Keep deletion success intact, expose listing retry button instead of reporting deletion failure.
+            if (currentScopeRef.current.serverId === targetServerId && currentScopeRef.current.path === targetPath) {
+                setListingError(err?.response?.data?.message || "Failed to refresh directory listing.");
+            }
         }
     };
 
@@ -166,25 +194,41 @@ export default function FilesPage() {
         if (!serverId || !renameName.trim() || renaming) return;
         setRenaming(true);
         setMutationError(null);
+        // Capture active server and path to check scope validity after async calls.
         const targetServerId = serverId;
         const targetPath = path;
+
+        // Perform rename operation.
         try {
             await renameFile(
                 targetServerId,
                 `${targetPath === "/" ? "" : targetPath}/${selected}`,
                 `${targetPath === "/" ? "" : targetPath}/${renameName}`
             );
+            // Reset rename input state upon successful rename.
             setRenameMode(false);
             setSelected(null);
+        } catch (err) {
+            // Report rename failure and prevent refresh from firing.
+            setMutationError(err?.response?.data?.message || `Failed to rename ${selected}.`);
+            return;
+        } finally {
+            setRenaming(false);
+        }
+
+        // Refresh directory listing with try/catch.
+        try {
             const { data } = await listFiles(targetServerId, targetPath);
+            // Only update entries if the user is still on the same server and directory path.
             if (currentScopeRef.current.serverId === targetServerId && currentScopeRef.current.path === targetPath) {
-                setEntries(data);
+                setEntries(data || []);
                 setListingError(null);
             }
         } catch (err) {
-            setMutationError(err?.response?.data?.message || `Failed to rename ${selected}.`);
-        } finally {
-            setRenaming(false);
+            // Maintain mutation success state and expose listing retry instead of false rename failure.
+            if (currentScopeRef.current.serverId === targetServerId && currentScopeRef.current.path === targetPath) {
+                setListingError(err?.response?.data?.message || "Failed to refresh directory listing.");
+            }
         }
     };
 
